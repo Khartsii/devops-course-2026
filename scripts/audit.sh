@@ -38,5 +38,23 @@ fi
 
 echo '[3] Учётные записи'
 awk -F: '$3>=1000 && $3<65534 {printf "    %s (uid=%s)\n",$1,$3}' /etc/passwd
+echo '[4] Веб-сервер'
+check 'Nginx запущен' active "$(systemctl is-active nginx)"
+nginx_config=error
+if sudo nginx -t; then nginx_config=ok; fi
+check 'Синтаксис Nginx' ok "$nginx_config"
+cert_state=error
+if openssl x509 -in /etc/ssl/certs/devops.crt -noout -checkend "${AUDIT_CERT_MIN_SECONDS:-2592000}"; then
+    cert_state=ok
+fi
+check 'Срок сертификата' ok "$cert_state"
+if writable=$(find /var/www/devops-site -perm -0002 -print) &&
+    key_mode=$(sudo stat -c '%a' /etc/ssl/private/devops.key) &&
+    [[ -z "$writable" && "$key_mode" == 600 ]]; then
+    check 'Права ресурса и ключа' ok ok
+else
+    check 'Права ресурса и ключа' ok error
+fi
+
 echo "Пройдено: $PASS, не пройдено: $FAIL"
 [[ $FAIL -eq 0 ]]

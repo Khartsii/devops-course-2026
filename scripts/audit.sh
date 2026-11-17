@@ -56,5 +56,21 @@ else
     check 'Права ресурса и ключа' ok error
 fi
 
+echo '[5] Контейнеризация'
+check 'Docker запущен' active "$(systemctl is-active docker)"
+health=$(docker inspect -f '{{.State.Health.Status}}' app-db-1) || health=error
+check 'PostgreSQL успешно проходит healthcheck' healthy "$health"
+binding=error
+if listeners=$(ss -H -tln) && awk '
+    $4 ~ /:(5000|5432)$/ && $4 !~ /^127[.]0[.]0[.]1:/ {bad=1}
+    $4 == "127.0.0.1:5000" {app=1}
+    END {exit (bad || !app)}
+' <<< "$listeners"; then
+    binding=ok
+fi
+check 'Привязка портов приложения и СУБД' ok "$binding"
+env_mode=$(stat -c '%a' /home/devops/app/.env) || env_mode=error
+check 'Права файла окружения' 600 "$env_mode"
+
 echo "Пройдено: $PASS, не пройдено: $FAIL"
 [[ $FAIL -eq 0 ]]

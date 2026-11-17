@@ -148,3 +148,27 @@ sudo nginx -t && sudo systemctl reload nginx
 через `DEPLOY_CONNECT_TO=devops.local:443:127.0.0.1:18443`. Это требует
 NAT-проброса 18443 → 443, ограниченного loopback Mac. Снимок VirtualBox
 `04-nginx-https` сделан после проверки HTTPS и до синхронизации сайта.
+
+## 9. Контейнеризация
+
+На Ubuntu 24.04 arm64 установлен Docker Engine 29.10.0 и Compose v5.7.2
+из официального APT-репозитория Docker. Инструкция установки:
+https://docs.docker.com/engine/install/ubuntu/
+Установлены docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin,
+docker-compose-plugin. В группе docker состоит devops. После изменения группы
+нужно открыть новое SSH-подключение.
+
+Доставьте каталог app/ в /home/devops/app через rsync с исключением .env.
+Создайте на VM app/.env по шаблону .env.example, задайте случайный пароль
+PostgreSQL и установите права 600. Секрет остаётся на VM. Запустите
+`docker compose up -d --build --wait` из /home/devops/app.
+
+Приложение доступно на 127.0.0.1:5000. Порт 5432 остаётся внутри сети app_backend.
+В PostgreSQL данные хранятся в именованном томе app_db_data. Остановка
+`docker compose down` сохраняет его. Удаление тома стирает данные.
+
+В HTTPS-блоке nginx/devops-site.conf запросы /app/ проксируются в
+http://127.0.0.1:5000/; конечный слеш снимает префикс /app/.
+Установите конфигурацию в /etc/nginx/sites-available/devops-site и выполните
+`sudo nginx -t && sudo systemctl reload nginx`. Статика остаётся в /var/www/devops-site.
+Проверка: /app/health возвращает ok, /app/ — счётчик, / — статический сайт.

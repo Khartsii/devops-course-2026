@@ -114,3 +114,37 @@ sudo ufw status numbered
 Созданы все три снимка. UFW и гостевой FQDN настроены после снимка 03-ssh-hardened. При восстановлении с 01-clean-install проверьте проброс на гостевой порт 22 и повторите разделы 4–6, затем шаги локального имени из раздела 2.
 
 Проверка §6.2 в госте: `bash scripts/audit.sh; echo $?`. Затем временно замените `MaxAuthTries 3` на `MaxAuthTries 10`, проверьте синтаксис `sudo sshd -t` и повторите аудит. Для проверки скрипта достаточно изменения файла, так как он читает `sshd -T`; перезапускать службу с ослабленным лимитом не требуется. Восстановите значение 3 и подтвердите код 0 повторным запуском. На работающей Ubuntu получены коды 0, 1, 0. После проверки восстановлено значение 3.
+
+## 8. Веб-сервер
+
+На Ubuntu установлен пакет nginx. UFW разрешает 80/tcp и 443/tcp. Ресурс
+`devops.local` обслуживается из `/var/www/devops-site` (devops:devops, 755).
+Файлы, включая `404.html`, принадлежат devops:devops и имеют права 644.
+Активная конфигурация — `/etc/nginx/sites-available/devops-site`, ссылка —
+`/etc/nginx/sites-enabled/devops-site`. HTTP перенаправляется на HTTPS кодом 301.
+При восстановлении:
+
+```bash
+sudo apt update && sudo apt install -y nginx rsync
+sudo install -d -m 755 -o devops -g devops /var/www/devops-site
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/devops.key -out /etc/ssl/certs/devops.crt \
+  -subj /CN=devops.local -addext subjectAltName=DNS:devops.local
+sudo chown root:root /etc/ssl/private/devops.key /etc/ssl/certs/devops.crt
+sudo chmod 600 /etc/ssl/private/devops.key
+sudo chmod 644 /etc/ssl/certs/devops.crt
+sudo install -m 644 nginx/devops-site.conf /etc/nginx/sites-available/devops-site
+sudo ln -sfn /etc/nginx/sites-available/devops-site /etc/nginx/sites-enabled/devops-site
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Публичный сертификат действует 365 дней. На клиенте передайте его через
+`curl --cacert`. Закрытый ключ служит только Nginx на VM.
+При штатной настройке скрипт `scripts/deploy.sh` использует псевдоним SSH
+`devops`, сертификат `~/devops.crt` и URL `https://devops.local/`.
+Если Host-only недоступен, можно указать отдельную настройку клиента
+`DEPLOY_RSYNC_RSH`, путь `DEPLOY_CA_CERT` и адрес для `curl --connect-to`
+через `DEPLOY_CONNECT_TO=devops.local:443:127.0.0.1:18443`. Это требует
+NAT-проброса 18443 → 443, ограниченного loopback Mac. Снимок VirtualBox
+`04-nginx-https` сделан после проверки HTTPS и до синхронизации сайта.

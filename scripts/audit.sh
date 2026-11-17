@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -uo pipefail
+export LC_ALL=C
+PASS=0
+FAIL=0
+
+check() {
+    local description="$1" expected="$2" actual="$3"
+    if [[ "$actual" == "$expected" ]]; then
+        printf '  [OK]   %s\n' "$description"
+        ((PASS += 1))
+    else
+        printf '  [FAIL] %s (ожидалось: %s, получено: %s)\n' "$description" "$expected" "$actual"
+        ((FAIL += 1))
+    fi
+}
+
+echo "Аудит конфигурации: $(hostname -f), $(date '+%Y-%m-%d %H:%M')"
+echo '[1] Служба SSH'
+if ssh_config=$(sudo sshd -T); then
+    check 'Вход root' no "$(awk '$1=="permitrootlogin" {print $2}' <<< "$ssh_config")"
+    check 'Парольная аутентификация' no "$(awk '$1=="passwordauthentication" {print $2}' <<< "$ssh_config")"
+    ports=$(awk '$1=="port" {print $2}' <<< "$ssh_config")
+    port_check=$(awk '$1=="port" {n++; if ($2 !~ /^[0-9]+$/ || $2 < 1 || $2 > 65535 || $2 == 22) bad=1} END {print (n && !bad ? "да" : "нет")}' <<< "$ssh_config")
+    check "Заданы только порты SSH, отличные от 22 (${ports//$'\n'/, })" да "$port_check"
+    check 'Лимит попыток аутентификации' 3 "$(awk '$1=="maxauthtries" {print $2}' <<< "$ssh_config")"
+else
+    check 'Чтение действующей конфигурации SSH' доступно ошибка
+fi
+
+echo '[2] Межсетевой экран'
+if firewall=$(sudo ufw status verbose); then
+    check 'Статус UFW' active "$(awk '$1=="Status:" {print $2}' <<< "$firewall")"
+    check 'Политика для входящего трафика' deny "$(awk '$1=="Default:" && $3=="(incoming)," {print $2}' <<< "$firewall")"
+else
+    check 'Чтение конфигурации UFW' доступно ошибка
+fi
+
+echo '[3] Учётные записи'
+awk -F: '$3>=1000 && $3<65534 {printf "    %s (uid=%s)\n",$1,$3}' /etc/passwd
+echo "Пройдено: $PASS, не пройдено: $FAIL"
+[[ $FAIL -eq 0 ]]
